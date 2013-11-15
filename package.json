@@ -1,0 +1,16 @@
+{
+  "name": "iris-kit",
+  "version": "0.2.5",
+  "description": "Built distribution of the Iris library",
+  "main": "iris.js",
+  "repository": {
+      "type": "git",
+      "url": "github.com:gingi/iris-kit"
+  },
+  "author": {
+      "name": "Shiran Pasternak",
+      "email": "shiranpasternak@gmail.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/gingi/iris-kit"
+}
