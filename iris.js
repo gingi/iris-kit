@@ -1,15 +1,15 @@
 /** 
- * Iris 0.2.6
+ * Iris 0.2.8
  *
  * @license Copyright (c) 2012-2013 The Silvan Group
  * For more information, see: http://github.com/silvn/iris
  */
 
 (function () {
-var Iris;(function () { if (typeof Iris === 'undefined') {
-Iris = {};
+var Iris;(function () { if (!Iris || !Iris.requirejs) {
+if (!Iris) { Iris = {}; } else { require = Iris; }
 /** vim: et:ts=4:sw=4:sts=4
- * @license RequireJS 2.1.5 Copyright (c) 2010-2012, The Dojo Foundation All Rights Reserved.
+ * @license RequireJS 2.1.9 Copyright (c) 2010-2012, The Dojo Foundation All Rights Reserved.
  * Available via the MIT or new BSD license.
  * see: http://github.com/jrburke/requirejs for details
  */
@@ -22,7 +22,7 @@ var requirejs, require, define;
 (function (global) {
     var req, s, head, baseElement, dataMain, src,
         interactiveScript, currentlyAddingScript, mainScript, subPath,
-        version = '2.1.5',
+        version = '2.1.9',
         commentRegExp = /(\/\*([\s\S]*?)\*\/|([^:]|^)\/\/(.*)$)/mg,
         cjsRequireRegExp = /[^.]\s*require\s*\(\s*["']([^'"\s]+)["']\s*\)/g,
         jsSuffixRegExp = /\.js$/,
@@ -32,7 +32,7 @@ var requirejs, require, define;
         hasOwn = op.hasOwnProperty,
         ap = Array.prototype,
         apsp = ap.splice,
-        isBrowser = !!(typeof window !== 'undefined' && navigator && document),
+        isBrowser = !!(typeof window !== 'undefined' && typeof navigator !== 'undefined' && window.document),
         isWebWorker = !isBrowser && typeof importScripts !== 'undefined',
         //PS3 indicates loaded and complete, but need to wait for complete
         //specifically. Sequence is 'loading', 'loaded', execution,
@@ -142,6 +142,10 @@ var requirejs, require, define;
 
     function scripts() {
         return document.getElementsByTagName('script');
+    }
+
+    function defaultOnError(err) {
+        throw err;
     }
 
     //Allow getting a global that expressed in
@@ -379,7 +383,6 @@ var requirejs, require, define;
         function hasPathFallback(id) {
             var pathConfig = getOwn(config.paths, id);
             if (pathConfig && isArray(pathConfig) && pathConfig.length > 1) {
-                removeScript(id);
                 //Pop off the first array value, since it failed, and
                 //retry
                 pathConfig.shift();
@@ -510,7 +513,12 @@ var requirejs, require, define;
                     fn(defined[id]);
                 }
             } else {
-                getModule(depMap).on(name, fn);
+                mod = getModule(depMap);
+                if (mod.error && name === 'error') {
+                    fn(mod.error);
+                } else {
+                    mod.on(name, fn);
+                }
             }
         }
 
@@ -581,7 +589,13 @@ var requirejs, require, define;
                         id: mod.map.id,
                         uri: mod.map.url,
                         config: function () {
-                            return (config.config && getOwn(config.config, mod.map.id)) || {};
+                            var c,
+                                pkg = getOwn(config.pkgs, mod.map.id);
+                            // For packages, only support config targeted
+                            // at the main module.
+                            c = pkg ? getOwn(config.config, mod.map.id + '/' + pkg.main) :
+                                      getOwn(config.config, mod.map.id);
+                            return  c || {};
                         },
                         exports: defined[mod.map.id]
                     });
@@ -850,8 +864,13 @@ var requirejs, require, define;
                     if (this.depCount < 1 && !this.defined) {
                         if (isFunction(factory)) {
                             //If there is an error listener, favor passing
-                            //to that instead of throwing an error.
-                            if (this.events.error) {
+                            //to that instead of throwing an error. However,
+                            //only do it for define()'d  modules. require
+                            //errbacks should not be called for failures in
+                            //their callbacks (#699). However if a global
+                            //onError is set, use that.
+                            if ((this.events.error && this.map.isDefine) ||
+                                req.onError !== defaultOnError) {
                                 try {
                                     exports = context.execCb(id, factory, depExports, exports);
                                 } catch (e) {
@@ -879,8 +898,8 @@ var requirejs, require, define;
 
                             if (err) {
                                 err.requireMap = this.map;
-                                err.requireModules = [this.map.id];
-                                err.requireType = 'define';
+                                err.requireModules = this.map.isDefine ? [this.map.id] : null;
+                                err.requireType = this.map.isDefine ? 'define' : 'require';
                                 return onError((this.error = err));
                             }
 
@@ -1103,7 +1122,7 @@ var requirejs, require, define;
                         }));
 
                         if (this.errback) {
-                            on(depMap, 'error', this.errback);
+                            on(depMap, 'error', bind(this, this.errback));
                         }
                     }
 
@@ -1454,6 +1473,8 @@ var requirejs, require, define;
                         var map = makeModuleMap(id, relMap, true),
                             mod = getOwn(registry, id);
 
+                        removeScript(id);
+
                         delete defined[id];
                         delete urlFetched[map.url];
                         delete undefEvents[id];
@@ -1599,7 +1620,7 @@ var requirejs, require, define;
 
                     //Join the path parts together, then figure out if baseUrl is needed.
                     url = syms.join('/');
-                    url += (ext || (/\?/.test(url) || skipExt ? '' : '.js'));
+                    url += (ext || (/^data\:|\?/.test(url) || skipExt ? '' : '.js'));
                     url = (url.charAt(0) === '/' || url.match(/^[\w\+\.\-]+:/) ? '' : config.baseUrl) + url;
                 }
 
@@ -1615,7 +1636,7 @@ var requirejs, require, define;
             },
 
             /**
-             * Executes a module callack function. Broken out as a separate function
+             * Executes a module callback function. Broken out as a separate function
              * solely to allow the build system to sequence the files in the built
              * layer in the right sequence.
              *
@@ -1653,7 +1674,7 @@ var requirejs, require, define;
             onScriptError: function (evt) {
                 var data = getScriptData(evt);
                 if (!hasPathFallback(data.id)) {
-                    return onError(makeError('scripterror', 'Script error', evt, [data.id]));
+                    return onError(makeError('scripterror', 'Script error for: ' + data.id, evt, [data.id]));
                 }
             }
         };
@@ -1782,8 +1803,19 @@ var requirejs, require, define;
      * function. Intercept/override it if you want custom error handling.
      * @param {Error} err the error object.
      */
-    req.onError = function (err) {
-        throw err;
+    req.onError = defaultOnError;
+
+    /**
+     * Creates the node for the load command. Only used in browser envs.
+     */
+    req.createNode = function (config, moduleName, url) {
+        var node = config.xhtml ?
+                document.createElementNS('http://www.w3.org/1999/xhtml', 'html:script') :
+                document.createElement('script');
+        node.type = config.scriptType || 'text/javascript';
+        node.charset = 'utf-8';
+        node.async = true;
+        return node;
     };
 
     /**
@@ -1800,12 +1832,7 @@ var requirejs, require, define;
             node;
         if (isBrowser) {
             //In the browser so use a script tag
-            node = config.xhtml ?
-                    document.createElementNS('http://www.w3.org/1999/xhtml', 'html:script') :
-                    document.createElement('script');
-            node.type = config.scriptType || 'text/javascript';
-            node.charset = 'utf-8';
-            node.async = true;
+            node = req.createNode(config, moduleName, url);
 
             node.setAttribute('data-requirecontext', context.contextName);
             node.setAttribute('data-requiremodule', moduleName);
@@ -1902,7 +1929,7 @@ var requirejs, require, define;
     }
 
     //Look for a data-main script attribute, which could also adjust the baseUrl.
-    if (isBrowser) {
+    if (isBrowser && !cfg.skipDataMain) {
         //Figure out baseUrl. Get it from the script tag with require.js in it.
         eachReverse(scripts(), function (script) {
             //Set the 'head' where we can append children by
@@ -1916,24 +1943,31 @@ var requirejs, require, define;
             //baseUrl, if it is not already set.
             dataMain = script.getAttribute('data-main');
             if (dataMain) {
+                //Preserve dataMain in case it is a path (i.e. contains '?')
+                mainScript = dataMain;
+
                 //Set final baseUrl if there is not already an explicit one.
                 if (!cfg.baseUrl) {
                     //Pull off the directory of data-main for use as the
                     //baseUrl.
-                    src = dataMain.split('/');
+                    src = mainScript.split('/');
                     mainScript = src.pop();
                     subPath = src.length ? src.join('/')  + '/' : './';
 
                     cfg.baseUrl = subPath;
-                    dataMain = mainScript;
                 }
 
-                //Strip off any trailing .js since dataMain is now
+                //Strip off any trailing .js since mainScript is now
                 //like a module name.
-                dataMain = dataMain.replace(jsSuffixRegExp, '');
+                mainScript = mainScript.replace(jsSuffixRegExp, '');
+
+                 //If mainScript is still a path, fall back to dataMain
+                if (req.jsExtRegExp.test(mainScript)) {
+                    mainScript = dataMain;
+                }
 
                 //Put the data-main script in the files to load.
-                cfg.deps = cfg.deps ? cfg.deps.concat(dataMain) : [dataMain];
+                cfg.deps = cfg.deps ? cfg.deps.concat(mainScript) : [mainScript];
 
                 return true;
             }
@@ -1961,12 +1995,13 @@ var requirejs, require, define;
         //This module may not have dependencies
         if (!isArray(deps)) {
             callback = deps;
-            deps = [];
+            deps = null;
         }
 
         //If no name, and callback is a function, then figure out if it a
         //CommonJS thing with dependencies.
-        if (!deps.length && isFunction(callback)) {
+        if (!deps && isFunction(callback)) {
+            deps = [];
             //Remove comments from the callback string,
             //look for require calls, and pull them into the dependencies,
             //but only if there are function args.
@@ -22251,13 +22286,23 @@ Iris.define('iris/root',["backbone", "underscore"], function (Backbone, _) {
     });
 
     /**
-     * Extends the class.
      * @method extend
+     * Extends the class.
      * @param {Object} object
      *        A hash of functions and object that extend the class
      * @return {Object} A new subclass of this class.
      */
     Root.extend = Backbone.View.extend;
+    
+    /**
+     * @method register
+     * Registers an object within this namespace.
+     * @param {String} name The name of the object
+     * @param {Object} object The object to register
+     */
+    Root.register = function (name, object) {
+        this[name] = object;
+    };
     return Root;
 });
 
@@ -22293,6 +22338,12 @@ Iris.define('iris/widget',["iris/root"], function (Root) {
         initialize: function (options) {
             this.element = options.element;
         }
+        /**
+         * @method register
+         * @inheritdoc Root#register
+         * @param {String} name The name of the widget
+         * @param {Object} widget The widget to register
+         */
     });
 });
 
@@ -22420,10 +22471,6 @@ Iris.define('iris/renderer',["iris/root", "iris/util", "underscore"], function (
                 ": exampleData() function not implemented");
         },
 
-        setup: function (args) {
-            // renderer specific initialization code such as loading css
-        },
-
         /**
          * @method render
          * Renders a data visualization.
@@ -22445,6 +22492,11 @@ Iris.define('iris/renderer',["iris/root", "iris/util", "underscore"], function (
                 ": update() function not implemented");
         },
 
+        /**
+         * @method setData
+         * Sets the data used for rendering.
+         * @param {Object} The data
+         */
         setData: function (data) {
             this.data = data;
         },
@@ -22464,8 +22516,13 @@ Iris.define('iris/renderer',["iris/root", "iris/util", "underscore"], function (
          * @param {Object} args - key-value pair of options.
          */
         set: function (args) {
-            
         }
+        /**
+         * @method register
+         * @inheritdoc Root#register
+         * @param {String} name The name of the renderer
+         * @param {Object} renderer The renderer to register
+         */
     };
 
     return Root.extend(renderer);
@@ -22478,21 +22535,21 @@ Iris.define('iris/renderer',["iris/root", "iris/util", "underscore"], function (
  * @singleton
  */
 Iris.define('iris',['require','iris/widget','iris/renderer'],function (require) {
-    var Iris      = {};
+    var Core = {};
 
     /**
      * The Widget container
      * @property {Widget}
      */
-    Iris.Widget   = require('iris/widget');
+    Core.Widget = require("iris/widget");
 
     /**
      * The Renderer container
      * @property {Renderer}
      */
-    Iris.Renderer = require('iris/renderer');
+    Core.Renderer = require("iris/renderer");
 
-    return Iris;
+    return Core;
 });
 Iris.define('util/scale',[],function () {
     /**
@@ -22984,7 +23041,7 @@ function ($, Iris, DragBox, Scale, _, ExampleData) {
         },
         /**
          * @method initialize
-         * @inheritdoc Widget#initialize
+         * @inheritdoc Renderer#initialize
          */
         initialize: function (options) {
             options = options || {};
@@ -25168,13 +25225,7 @@ Iris.define('renderers/table',['jquery', 'underscore'],
 
     return Table;
 });
-Iris.define('charts/bar',['jquery', 'd3', 'underscore'], function (JQ, d3, _) {
-    var defaults = {
-        yTitle: 'Y Axis',
-        axisLabelFontSize: 10,
-        padding: 10
-    };
-
+Iris.define('charts/bar',["iris", "jquery", "d3", "underscore"], function (Iris, JQ, d3, _) {
     function labelFontHeight(svg) {
         var text = svg.append("g").attr("class", "x axis")
             .append("svg:text").text("M");
@@ -25183,38 +25234,46 @@ Iris.define('charts/bar',['jquery', 'd3', 'underscore'], function (JQ, d3, _) {
         return height;
     }
 
-    function BarChart(options) {
-        var self = this;
-        options = options ? _.clone(options) : {};
-        _.defaults(options, defaults);
-        var $el = JQ(options.element);
-        var data;
-        self.setData = function (inData) {
+    /**
+     * @class BarChart
+     * A standard bar chart
+     * 
+     * @extends Renderer
+     */
+    var BarChart = Iris.Renderer.extend({
+        defaults: {
+            yTitle: 'Y Axis',
+            axisLabelFontSize: 10,
+            padding: 10,
+            margin: { top: 20, right: 20, bottom: 40, left: 40 }
+        },
+        /**
+         * @method setData
+         * @inheritdoc Renderer#setData
+         */
+        setData: function (inData) {
             if (typeof inData === "object") {
-                data = [];
+                this.data = [];
                 for (var key in inData) {
-                    data.push(inData[key]);
+                    this.data.push(inData[key]);
                 }
             } else {
                 // It's a plain list
-                data = inData;
+                this.data = inData;
             }
-            return self;
-        };
-        self.getData = function () {
-            return data;
-        };
-        self.render = function () {
-            var margin = {
-                top: 20,
-                right: 20,
-                bottom: 40,
-                left: 40
-            },
-            width  =
-                $el.width()  - margin.left - margin.right - options.padding,
-            height =
-                $el.height() - margin.top  - margin.bottom - options.padding;
+            return this;
+        },
+        /**
+         * @method render
+         * @inheritdoc Renderer#render
+         */
+        render: function () {
+            var self = this;
+            var margin = self.options.margin;
+            var padding = self.options.padding;
+            var $el = JQ(self.options.element);
+            var width  = $el.width()  - margin.left - margin.right - padding;
+            var height = $el.height() - margin.top  - margin.bottom - padding;
             $el.empty();
 
             var format = d3.format(".0");
@@ -25228,16 +25287,16 @@ Iris.define('charts/bar',['jquery', 'd3', 'underscore'], function (JQ, d3, _) {
 
             var svg = d3.select($el[0])
                 .append("svg")
-                .attr("width", $el.width() - options.padding)
+                .attr("width", $el.width() - padding)
                 .attr("height", height)
-                .style("margin", options.padding / 2)
+                .style("margin", padding / 2)
                 .append("g")
                 .attr("transform",
                     "translate(" + margin.left + "," + margin.top + ")");
 
 
-            x.domain(_.map(data, function (d) {return d.x; }));
-            y.domain([0, d3.max(data, function (d) { return d.y; }) ]);
+            x.domain(_.map(self.data, function (d) {return d.x; }));
+            y.domain([0, d3.max(self.data, function (d) { return d.y; }) ]);
 
             function drawXAxis(elem) {
                 if (x.rangeBand() > labelFontHeight(svg)) {
@@ -25266,10 +25325,10 @@ Iris.define('charts/bar',['jquery', 'd3', 'underscore'], function (JQ, d3, _) {
                 .attr("y", 6)
                 .attr("dy", ".71em")
                 .style("text-anchor", "end")
-                .text(options.yTitle);
+                .text(self.options.yTitle);
 
             svg.selectAll(".bar")
-                .data(data)
+                .data(self.data)
                 .enter()
                 .append("rect")
                 .attr("class", "bar")
@@ -25282,7 +25341,7 @@ Iris.define('charts/bar',['jquery', 'd3', 'underscore'], function (JQ, d3, _) {
             svg.on("click", change);
 
             function change() {
-                var clone = _.clone(data);
+                var clone = _.clone(self.data);
                 var x0 = x.domain(_.chain(clone).sort(this.checked
                     ? function(a, b) { return d3.ascending(a.x, b.x); }
                     : function(a, b) { return b.y - a.y; })
@@ -25307,7 +25366,8 @@ Iris.define('charts/bar',['jquery', 'd3', 'underscore'], function (JQ, d3, _) {
             }
             return self;
         }
-    }
+    });
+    Iris.Renderer.register("BarChart", BarChart);
     return BarChart;
 })
 ;
@@ -28460,8 +28520,9 @@ Iris.define('util/viewport',[
     "underscore",
     "util/progress",
     "util/syntax",
-    "util/modal"
-], function (JQ, _, Progress, Syntax, Modal) {
+    "util/modal",
+    "iris"
+], function (JQ, _, Progress, Syntax, Modal, Iris) {
     var viewportCounter = 1;
     var defaults = {
         height: 400,
@@ -28679,4 +28740,227 @@ Iris.define('util/viewport',[
     return Viewport;
 });
 
-console.log(Iris); window.Iris = Iris; jQuery.noConflict(true); }());
+
+Iris.define('util/graph',['require'],function (require) {
+    function Node(graph, meta) {
+    	var _meta = {};
+    	this.neighbors = function () {
+			return graph.neighbors(this);
+		};
+        this.link = function (neighbor) {
+			graph.link(this, neighbor);
+            return this;
+		};
+        this.attribute = function (key, val) {
+			_meta[key] = val;
+            return this;
+		};
+        this.meta = function (input) {
+            if (input) {
+                for (var prop in input) {
+                    _meta[prop] = input[prop];
+                }
+                return this;
+            }
+            return _meta;
+        };
+        this.get = function (key) { return _meta[key] },
+        this.set = this.attribute;
+        if (meta) this.meta(meta);
+        return this;
+    }
+    function isNode(obj) {
+        return obj instanceof Node;
+    }
+    
+    function Edge(params) {
+        params = params || {};
+        this.source = params.source;
+        this.target = params.target;
+        this.meta   = params.meta;
+        this.json   = function () {
+            return {
+                source: this.source,
+                target: this.target,
+                meta:   this.meta
+            }
+        }
+    }
+
+    function isInt(val) {
+        return !isNaN(parseInt(val)) && (parseFloat(val) == parseInt(val)); 
+    }
+
+    var _INDEXED = new Object(1);
+    var Graph = function (data, type) {
+        var self = this;
+        var idSequence = 0;
+        var nodes = {};
+        var edges = {};
+        var lookup = {}; // Used for client node lookup by external ID
+        
+        self.link = function (n1, n2, meta) {
+            function findId(obj) {
+                if (isNode(obj)) { return obj._id }
+                var n = lookup[obj];
+                return n ? n._id : null;
+            }
+            n1 = findId(n1);
+            n2 = findId(n2);
+            var key = [n1, n2].sort().join(" ");
+            return edges[key] = new Edge({
+                source: nodes[n1],
+                target: nodes[n2],
+                meta: meta
+            });
+        }
+        self.addNode = function (obj) {
+            var node;
+            if (isNode(obj)) {
+                node = new Node(this, obj.meta());
+                if (obj.get('id')) {
+                    lookup[obj.get('id')] = node;
+                }
+            } else {
+                node = new Node(this);
+                if (typeof obj === "object") { // We're passed an assoc. list
+                    node.meta(obj);
+                } else if (obj != null) { // obj is an id (some scalar)
+                    lookup[obj] = node;
+                    node.set("id", obj);
+                }
+            }
+            node._id = idSequence;
+            nodes[idSequence++] = node;
+            return node;
+        }
+        self.addEdge = function (edge) {
+            if (edge instanceof Edge) { // Reassign source/target
+                var source = this.findNode(edge.source.meta());
+                var target = this.findNode(edge.target.meta());
+                if (source != null && target != null) {
+                    return self.link(source, target, edge.meta);
+                }
+                return null;
+            }
+            var meta = edge;
+            return type == _INDEXED
+                ? self.link(nodes[edge.source], nodes[edge.target], meta)
+                : self.link(edge.source, edge.target, meta);
+        }
+        self.neighbors = function (node) {
+            var arr = [];
+            for (var key in edges) {
+                var nodeId = node._id;
+                var edge = edges[key];
+                if (edge.source._id == nodeId)
+                    arr.push(edge.target);
+                else if (edge.target._id == nodeId)
+                    arr.push(edge.source);
+            }
+            return arr;
+        }
+        self.nodes = function () {
+            var arr = [];
+            for (var k in nodes) { arr.push(nodes[k]); }
+            return arr;
+        }
+        self.edges = function () {
+            var arr = [];
+            for (var k in edges) { arr.push(edges[k]); }
+            return arr;
+        }
+        self.json = function () {
+            var jsonNodes = [];
+            var jsonEdges = [];
+            var nodeIndex = {};
+            for (var k in nodes) {
+                var node = nodes[k];
+                var meta = node.meta();
+                var nodeId = node._id;
+                nodeIndex[nodeId] = jsonNodes.length;
+                jsonNodes.push(meta);
+            }
+            for (var key in edges) {
+                var edge = edges[key];
+                var attributes = {};
+                for (var a in edge.meta) {
+                    if (edge.meta.hasOwnProperty(a)) {
+                        attributes[a] = edge.meta[a];
+                    }
+                }
+                attributes.source = nodeIndex[edge.source._id],
+                attributes.target = nodeIndex[edge.target._id]
+                jsonEdges.push(attributes);
+            }
+            return { nodes: jsonNodes, edges: jsonEdges };
+        }
+        self.eachNode = function (callback) {
+            for (var i in nodes) {
+                callback(nodes[i]);
+            }
+        }
+        self.findNode = function (meta) {
+            for (var i in nodes) {
+                var node = nodes[i];
+                found = true;
+                for (var prop in meta) {
+                    if (node.get(prop) != meta[prop])
+                        found = false;
+                }
+                if (found) {
+                    return node;
+                }
+            }
+            return null;
+        }
+        self.findEdge = function (meta1, meta2) {
+            var n1 = isNode(meta1) ? meta1 : self.findNode(meta1);
+            var n2 = isNode(meta2) ? meta2 : self.findNode(meta2);
+            if (n1 != null && n2 != null) {
+                for (var key in edges) {
+                    var edge = edges[key];
+                    if ((edge.source == n1 && edge.target == n2) ||
+                        (edge.target == n1 && edge.source == n2)) 
+                        return edge;
+                }
+            }
+            return null;
+        }
+
+        function initializeData(graph) {
+            if (graph.nodes) {
+                graph.nodes.forEach(function (meta) {
+                    self.addNode(meta);
+                })
+            }
+            if (graph.edges) {
+                graph.edges.forEach(function (edge) {
+                    self.addEdge(edge);
+                })
+            }
+        }
+        if (data) initializeData(data);
+        return self;
+    }
+    Graph.INDEXED = _INDEXED;
+
+    return Graph;
+});
+Iris.define("iris", function(){});
+    var wrapper = function (callback) {
+        wrapper.require   = Iris.require;
+        wrapper.requirejs = Iris.requirejs;
+        wrapper.define    = Iris.define;
+        Iris.require([
+    'iris/renderer','iris/widget','util/viewport','charts/bar'
+        ], function (Renderer, Widget, Viewport) {
+             wrapper.Widget   = Widget;
+             wrapper.Renderer = Renderer;
+             wrapper.Viewport = Viewport;
+             callback(wrapper);
+        });
+    };
+    window.Iris = wrapper;
+    jQuery.noConflict(true);
+ }());
