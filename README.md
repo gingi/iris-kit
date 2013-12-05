@@ -1,7 +1,7 @@
 iris-kit
 ========
-Version 0.2.8
+Version 0.2.9
 
 Starter kit for the Iris project (http://silvn.github.io/iris).
 
-Iris [v0.2.8](https://github.com/gingi/iris/releases/tag/0.2.8)
+Iris [v0.2.9](https://github.com/gingi/iris/releases/tag/0.2.9)
