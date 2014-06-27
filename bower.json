@@ -1,0 +1,26 @@
+{
+  "name": "iris",
+  "version": "0.2.11",
+  "authors": [
+    "Shiran Pasternak <shiranpasternak@gmail.com>"
+  ],
+  "description": "A web library for data visualization and exploration.",
+  "main": "iris.js",
+  "moduleType": [
+    "amd"
+  ],
+  "keywords": [
+    "datavis",
+    "scientific",
+    "data"
+  ],
+  "license": "MIT",
+  "homepage": "http://silvn.github.io/iris",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ]
+}
